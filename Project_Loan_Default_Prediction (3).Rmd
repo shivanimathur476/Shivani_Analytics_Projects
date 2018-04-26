@@ -1,0 +1,274 @@
+---
+title: "Loan Default prediction"
+output: html_notebook
+---
+
+
+```{r}
+#######################################LOAD DATA#######################################
+rm(list = ls())
+set.seed(1000)
+#library(mlbench)
+library(caret)
+library(dplyr)
+library(gbm)
+#library(nnet)
+Loan_Prediction1#This is original data
+```
+```{r}
+#######################################DATA CLEANING#######################################
+#remove duplicated columns
+Loan_Prediction2<-Loan_Prediction1[,!duplicated(as.list(Loan_Prediction1))]
+dim(Loan_Prediction2)
+
+#Treating missing values
+Preprocessed<-preProcess(Loan_Prediction2,method = "medianImpute")
+Loan_Prediction3<-predict(Preprocessed,Loan_Prediction2)
+
+
+dim(Loan_Prediction3)
+#Generating Z scores
+#Loan_Prediction3[]<-lapply(Loan_Prediction3,scale)
+#Loan_Prediction2<-data.frame(scale(Loan_Prediction1,center = TRUE,scale=TRUE))
+
+#zeroVariance Check
+dim(Loan_Prediction3)
+zv <- apply(Loan_Prediction3, 2, function(x) length(unique(x)) == 1)
+Loan_Prediction3 <- Loan_Prediction3[, !zv]
+dim(Loan_Prediction3)
+
+#Removing f678 having zero variance
+#Loan_Prediction3$f678<-NULL
+```
+```{r}
+#######################################CORRELATION CHECK#######################################
+descrCor <- cor(Loan_Prediction3)
+highlyCorDescr <- findCorrelation(descrCor, cutoff = .75)
+Loan_Prediction4<-Loan_Prediction3[,-highlyCorDescr]
+
+```
+```{r}
+dim(Loan_Prediction4)
+#Z-Score Standardization
+Loan_Prediction4_scaled<-data.frame(lapply(Loan_Prediction4,scale))
+Loan_Prediction4_scaled$loss<-Loan_Prediction4$loss
+Loan_Prediction4_scaled$X<-Loan_Prediction4$X
+#Normalization
+#Min-Max scaling
+#maxx= apply(Loan_Prediction4_scaled , 2 , max)
+#minn= apply(Loan_Prediction4_scaled, 2 , min)
+#Loan_Prediction4_scaled = as.data.frame(scale(Loan_Prediction4_scaled, center = minn, scale = maxx - minn))
+```
+
+```{r}
+#######################################NEW VARIABLE#######################################
+#converting loss into binary to make a new variable
+
+Loan_Prediction4_scaled$loss_binary <- ifelse(Loan_Prediction4_scaled$loss > 0, 1, 0)
+dim(Loan_Prediction4_scaled)
+
+```
+
+```{r}
+#######################################DIVIDE INTO TEST AND TRAIN#######################################
+Loan_Prediction5<-Loan_Prediction4_scaled
+#Dividing into train and test
+TrainIndex=sample(nrow(Loan_Prediction5),round(nrow(Loan_Prediction5)*.7))
+TrainData=Loan_Prediction5[TrainIndex,]
+TestData=Loan_Prediction5[-TrainIndex,]
+
+```
+
+
+```{r}
+
+#Making model on Train Data and testing on test data
+C1=TrainData
+C1$loss=NULL
+Model<-glm(loss_binary~.-X,family = "binomial",data=C1)#predict loss binary without using loss information
+summary(Model)
+
+
+Predictions1=predict(Model,TestData,type='response')
+Predictions1
+
+TestData2=TestData
+TestData2$PDS=Predictions1
+X=TestData2[,c("loss_binary","PDS")] #To see predicted results vs actual results
+library(pROC)
+roc(TestData2$loss_binary, Predictions1)
+mean(TestData2$PDS)
+
+#Getting predictions for train data as well
+Predictions2=predict(Model,TrainData,type='response')
+TrainData2=TrainData
+TrainData2$PDS=Predictions2
+Y=TrainData2[,c("loss_binary","PDS")] #To see predicted results vs actual results
+library(pROC)
+roc(TrainData2$loss_binary, Predictions2)
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+```
+
+```{r}
+
+```
+
+```{r}
+####################################Lasso Reg #############################################
+
+library(glmnet)
+library(glmnetUtils)
+TrainData5=filter(TrainData2, TrainData2$loss_binary==1)
+TrainData5$loss_binary
+TestData5=filter(TestData2, TestData2$loss_binary==1)
+TestData5$loss_binary
+#Trying Lasso
+C2=TrainData5
+
+C2$loss_binary=NULL
+C2$PDS=NULL
+cvfit1 = cv.glmnet(loss~. -X ,data=C2, alpha = 1, nlambda =100)
+plot(cvfit1)
+cvfit1$lambda.min
+coef(cvfit1, s = "lambda.min")
+
+
+predicts_glm_lasso<-predict(cvfit1, newdata = TestData5, s = "lambda.min")
+library(Metrics)
+MAE= mae(TestData5$loss, predicts_glm_lasso)
+MAE
+
+
+
+#Output File Generation
+TestData4=TestData5
+TestData4$PredictedLoss=predicts_glm_lasso
+Z1=TestData4[,c("X","loss","PredictedLoss")]
+
+
+
+```
+
+```{r}
+#Trying different thresholds to get better MAE
+
+TestData6=TestData2
+TestData7=filter(TestData6, PDS>0.3)#Keep changing this value to get best MAE. For 0.3 best results are obtained. MAE=3.48 for this threshold.
+#TestData7$PDS
+#TestData7$loss
+
+
+#Check which one threshold, which one is giving max correctly classified instances
+library(dplyr)
+T1=subset(TestData7, loss_binary>0)#These many 1s got forwarded to regression model
+nrow(T1)/nrow(TestData7)#These many % of 1s records are going to regression model from classification model. More the percentage means more the accurate threshold.
+
+
+
+
+
+
+
+predicts_glm_lasso<-predict(cvfit1, newdata = TestData7, s = "lambda.min")
+library(Metrics)
+MAE= mae(TestData7$loss, predicts_glm_lasso)
+MAE
+
+
+
+#Output File Generation
+
+TestData7$PredictedLoss=abs(predicts_glm_lasso)
+Z2=TestData7[,c("X","loss","PredictedLoss")]
+```
+
+```{r}
+#Test Data Results
+#Load Test Data
+#TestMain=read.csv('Desktop/Adv. Data Mining/Group Project/test_no_lossv3.csv')
+
+Preprocessed<-preProcess(TestMain,method = "medianImpute")
+TestMain1<-predict(Preprocessed,TestMain)
+
+
+
+zv <- apply(TestMain1, 2, function(x) length(unique(x)) == 1)
+TestMain2 <- TestMain1[, !zv]
+
+
+TestMain2_scaled<-data.frame(lapply(TestMain2,scale))
+TestMain2_scaled$loss<-TestMain2$loss
+TestMain2_scaled$X<-TestMain2$X
+
+library(dplyr)
+PredictionsTD=predict(Model,TestMain2_scaled,type='response')
+PredictionsTD
+
+
+#Visualize Results
+Z3=TestMain2_scaled
+Z3$DefaulterProb=PredictionsTD
+Z4=Z3[,c("X","DefaulterProb")]
+
+
+#Apply threshold to pass limited data to regression model
+TestMain5=subset(Z3,DefaulterProb>0.3)
+TestMain6=TestMain5
+TestMain6$DefaulterProb=NULL
+
+#Apply regression model on this data to get how much they will default(Approximately)
+#Since regression works only on columns which are selected previously to build model, select those columns first and then run model
+common_cols <- intersect(colnames(C2), colnames(TestMain6))
+TestMain7=subset(TestMain6, select = common_cols)
+
+
+library(caret)
+predicts_glm_lasso<-predict(cvfit1, newdata = TestMain6,s = "lambda.min")
+predicts_glm_lasso
+#Create Output File
+Z5=TestMain7
+Z5$DefaultValues=abs(predicts_glm_lasso)
+Z6=Z5[,c("X","DefaultValues")] #Here default values will show how much a customer with certain customer id will default
+write.csv(Z6, file = "Loan Predicts.csv")
+
+#Saving non potential defaulters with default values 0
+O1=Z4
+O1$DefaulterProb=NULL
+library(sqldf)
+O2=sqldf('Select X from O1 where not exists(select X from Z6 where Z6.X=O1.X)') #Now these are customer ids with zero default values
+O2$DefaultValues<-0
+
+#Join two files to get final output file
+O3<-rbind(O2,Z6)
+O4=O3%>%arrange(X)
+
+#Create Final Output file with customer id and loss they may cause
+write.csv(O4, file = "Loan Predicts1.csv")
+
+
+
+
+
+
+
+
+
+
+
+```
+
