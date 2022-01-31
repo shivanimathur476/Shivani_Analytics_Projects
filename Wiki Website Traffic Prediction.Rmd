@@ -35,7 +35,7 @@ library('prophet') # time series analysis
 ### Loading data
 
 ```{r}
-TrainData <-fread("C:\\Users\\divya\\OneDrive\\Documents\\GitHub\\DivyaLingwal Analytics Work\\data\\train_1.csv\\train_1.csv")
+TrainData <-fread("C:\\Users\\shivani\\OneDrive\\Documents\\GitHub\\Shivani Analytics Work\\data\\train_1.csv\\train_1.csv")
 dim(TrainData)
 ```
 
